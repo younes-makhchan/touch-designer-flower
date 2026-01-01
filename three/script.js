@@ -48,6 +48,10 @@ Space: Reset position/rotation<br>
 `;
 document.body.appendChild(instructionsDiv);
 
+// --- MORPHING VARIABLES ---
+let startTime = Date.now();
+const cycleDuration = 6000; // 6 seconds (3s out, 3s back)
+
 // --- MOUSE CONTROLS (OrbitControls) ---
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true; // Adds that smooth "weight" to the movement
@@ -139,10 +143,21 @@ function createDahlia() {
         }
     }
 
+    // Store original positions and create sand dispersion seeds
     const geometry = new THREE.BufferGeometry();
     geometry.setIndex(indices);
     geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    // Store original positions for the morph back
+    geometry.setAttribute('basePosition', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+    // Create random seeds for sand dispersion
+    const seeds = new Float32Array(positions.length);
+    for (let i = 0; i < positions.length; i++) {
+        seeds[i] = (Math.random() - 0.5) * 10.0; // Random direction/speed
+    }
+    geometry.setAttribute('sandSeed', new THREE.BufferAttribute(seeds, 3));
+
     geometry.computeVertexNormals();
     return geometry;
 }
@@ -265,6 +280,34 @@ function animate() {
     // REQUIRED: Update controls every frame for damping to work
     controls.update();
 
+    const elapsedTime = Date.now() - startTime;
+
+    // --- 3-SECOND MORPH LOGIC ---
+    // Oscillates between 0 and 1 every 6 seconds
+    const morphFactor = (Math.sin((elapsedTime / cycleDuration) * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+
+    const positions = flowerSystem.geometry.attributes.position.array;
+    const basePositions = flowerSystem.geometry.attributes.basePosition.array;
+    const seeds = flowerSystem.geometry.attributes.sandSeed.array;
+
+    for (let i = 0; i < positions.length; i += 3) {
+        // We use a slight delay based on the radius to make it "peel" off
+        // Base distance from center (approximate using basePositions)
+        const r = Math.sqrt(basePositions[i]**2 + basePositions[i+2]**2) / 300;
+        const localMorph = Math.pow(Math.max(0, morphFactor - (1.0 - r) * 0.8), 2);
+
+        // Apply sand dispersion: Base Position + (Seed * Morph)
+        positions[i]     = basePositions[i]     + seeds[i]     * localMorph * 35.0;
+        positions[i + 1] = basePositions[i + 1] + seeds[i + 1] * localMorph * 35.0;
+        positions[i + 2] = basePositions[i + 2] + seeds[i + 2] * localMorph * 35.0;
+    }
+
+    // Tell Three.js the positions have changed
+    flowerSystem.geometry.attributes.position.needsUpdate = true;
+
+    // Optional: Pulse the emissive intensity with the morph
+    flowerSystem.material.emissiveIntensity = 0.2 + (morphFactor * 0.5);
+
     // Update flower transform display
     const pos = flowerSystem.position;
     const rot = flowerSystem.rotation;
@@ -272,7 +315,8 @@ function animate() {
 <b>Flower Transform:</b><br>
 Position: (${pos.x.toFixed(1)}, ${pos.y.toFixed(1)}, ${pos.z.toFixed(1)})<br>
 Rotation: (${(rot.x * 180/Math.PI).toFixed(1)}°, ${(rot.y * 180/Math.PI).toFixed(1)}°, ${(rot.z * 180/Math.PI).toFixed(1)}°)<br>
-Rotation (rad): (${rot.x.toFixed(2)}, ${rot.y.toFixed(2)}, ${rot.z.toFixed(2)})
+Rotation (rad): (${rot.x.toFixed(2)}, ${rot.y.toFixed(2)}, ${rot.z.toFixed(2)})<br>
+<b>Morph Factor: ${morphFactor.toFixed(2)}</b>
 `;
 
     renderer.render(scene, camera);
