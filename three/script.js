@@ -50,7 +50,7 @@ document.body.appendChild(instructionsDiv);
 
 // --- MORPHING VARIABLES ---
 let startTime = Date.now();
-const cycleDuration = 6000; // 6 seconds (3s out, 3s back)
+const cycleDuration = 6000; // 3 seconds total (1.5s out, 1.5s back)
 
 // --- MOUSE CONTROLS (OrbitControls) ---
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -151,12 +151,26 @@ function createDahlia() {
     geometry.setAttribute('basePosition', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
-    // Create random seeds for sand dispersion
-    const seeds = new Float32Array(positions.length);
-    for (let i = 0; i < positions.length; i++) {
-        seeds[i] = (Math.random() - 0.5) * 10.0; // Random direction/speed
+    // Create random spherical directions and speeds for organic sand dispersion
+    const randomDirections = new Float32Array(positions.length);
+    const sandSpeeds = new Float32Array(positions.length / 3);
+
+    for (let i = 0; i < positions.length; i += 3) {
+        // 1. Create a random unit vector (Direction) - spherical distribution
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos((Math.random() * 2) - 1);
+
+        // Randomize the direction (X, Y, Z)
+        randomDirections[i]     = Math.sin(phi) * Math.cos(theta);
+        randomDirections[i + 1] = Math.sin(phi) * Math.sin(theta);
+        randomDirections[i + 2] = Math.cos(phi);
+
+        // 2. Assign a speed (Some fall fast, some float)
+        sandSpeeds[i / 3] = 0.5 + Math.random() * 1.5;
     }
-    geometry.setAttribute('sandSeed', new THREE.BufferAttribute(seeds, 3));
+
+    geometry.setAttribute('sandDir', new THREE.BufferAttribute(randomDirections, 3));
+    geometry.setAttribute('sandSpeed', new THREE.BufferAttribute(sandSpeeds, 1));
 
     geometry.computeVertexNormals();
     return geometry;
@@ -168,28 +182,47 @@ function smoothStep(min, max, value) {
     return x * x * (3 - 2 * x);
 }
 
-// 3. Create Mathematical Dahlia with Organic Material
+// 3. Create Dual Objects: Mesh + Points for seamless transitions
 const geometry = createDahlia();
-const material = new THREE.MeshStandardMaterial({
+
+// 1. Create the Solid Mesh (for when it's a flower)
+const meshMaterial = new THREE.MeshStandardMaterial({
     vertexColors: true,
     side: THREE.DoubleSide,
-    transparent: true,    // Enable transparency for soft edges
-    opacity: 0.85,        // Slightly see-through
-    roughness: -0.2,       // High roughness = soft matte look (no metal shine)
-    metalness: 0.0,       // 0 metalness for organic feel
+    transparent: true,
+    opacity: 1.0,
+    roughness: 0.7,
+    metalness: 0.0,
     emissive: new THREE.Color(0xffffff),
-    emissiveIntensity: 0.2 // Very low glow for gentle effect
+    emissiveIntensity: 0.2
 });
 
 // Update the shader to keep the soft glow on the colors
-material.onBeforeCompile = (shader) => {
+meshMaterial.onBeforeCompile = (shader) => {
   shader.fragmentShader = shader.fragmentShader.replace(
     `vec3 totalEmissiveRadiance = emissive;`,
     `vec3 totalEmissiveRadiance = emissive * vColor;`
   );
 };
 
-const flowerSystem = new THREE.Mesh(geometry, material);
+const flowerMesh = new THREE.Mesh(geometry, meshMaterial);
+
+// 2. Create the Sand Points (for when it's blowing away)
+const pointsMaterial = new THREE.PointsMaterial({
+    size: 0.8,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0, // Start invisible
+    blending: THREE.AdditiveBlending,
+    depthWrite: false
+});
+
+const flowerPoints = new THREE.Points(geometry, pointsMaterial);
+
+// Group them so they move/rotate together
+const flowerSystem = new THREE.Group();
+flowerSystem.add(flowerMesh);
+flowerSystem.add(flowerPoints);
 
 // Apply the specific tilt from your reference image
 flowerSystem.rotation.x = 265  * Math.PI / 180 ; // Tilt toward viewer
@@ -284,29 +317,58 @@ function animate() {
 
     // --- 3-SECOND MORPH LOGIC ---
     // Oscillates between 0 and 1 every 6 seconds
-    const morphFactor = (Math.sin((elapsedTime / cycleDuration) * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+    const rawFactor = (Math.sin((elapsedTime / cycleDuration) * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+    const morphFactor = Math.pow(rawFactor, 1.2); // Snappier morph
 
-    const positions = flowerSystem.geometry.attributes.position.array;
-    const basePositions = flowerSystem.geometry.attributes.basePosition.array;
-    const seeds = flowerSystem.geometry.attributes.sandSeed.array;
+    // --- SEAMLESS MESH/POINTS TRANSITION ---
+    if (morphFactor < 0.01) {
+        // Back to solid Mesh
+        flowerMesh.visible = true;
+        flowerPoints.visible = false;
+        flowerMesh.material.opacity = 1.0;
+    } else {
+        // Morphing into Points
+        flowerMesh.visible = true;
+        flowerPoints.visible = true;
 
-    for (let i = 0; i < positions.length; i += 3) {
-        // We use a slight delay based on the radius to make it "peel" off
-        // Base distance from center (approximate using basePositions)
-        const r = Math.sqrt(basePositions[i]**2 + basePositions[i+2]**2) / 300;
-        const localMorph = Math.pow(Math.max(0, morphFactor - (1.0 - r) * 0.8), 2);
-
-        // Apply sand dispersion: Base Position + (Seed * Morph)
-        positions[i]     = basePositions[i]     + seeds[i]     * localMorph * 35.0;
-        positions[i + 1] = basePositions[i + 1] + seeds[i + 1] * localMorph * 35.0;
-        positions[i + 2] = basePositions[i + 2] + seeds[i + 2] * localMorph * 35.0;
+        // Cross-fade: Mesh disappears as Points take over
+        flowerMesh.material.opacity = Math.max(0.4, 1.0 - morphFactor * 2.0);
+        flowerPoints.material.opacity = Math.min(1.0, morphFactor * 2.0);
     }
 
-    // Tell Three.js the positions have changed
-    flowerSystem.geometry.attributes.position.needsUpdate = true;
+    // --- ORGANIC SAND DISPERSION ANIMATION ---
+    const posAttr = geometry.attributes.position;
+    const basePos = geometry.attributes.basePosition.array;
+    const sandDirs = geometry.attributes.sandDir.array;   // Our new random directions
+    const sandSpeeds = geometry.attributes.sandSpeed.array; // Individual grain speeds
 
-    // Optional: Pulse the emissive intensity with the morph
-    flowerSystem.material.emissiveIntensity = 0.2 + (morphFactor * 0.5);
+    for (let i = 0; i < posAttr.count; i++) {
+        const i3 = i * 3;
+
+        // Timing: Add a slight delay based on height (Y) to make it "crumble" from top to bottom
+        const heightDelay = (basePos[i3 + 1] + 200) / 400;
+        const individualMorph = Math.max(0, (morphFactor * sandSpeeds[i]) - (heightDelay * 0.2));
+
+        // Calculate movement based on the stored random direction
+        // Multiplier (80.0) controls how far the sand travels - reduced for closer dispersion
+        const travelDist = individualMorph * 20.0;
+
+        const moveX = sandDirs[i3]     * travelDist;
+        const moveY = sandDirs[i3 + 1] * travelDist;
+        const moveZ = sandDirs[i3 + 2] * travelDist;
+
+        // Add a "gravity" effect: sand starts to fall over time
+        const gravity = Math.pow(individualMorph, 2) * -50.0;
+
+        // Add a "swirl" to make it look like air currents
+        const swirl = Math.sin(elapsedTime * 0.002 + i) * 15.0 * individualMorph;
+
+        posAttr.array[i3]     = basePos[i3]     + moveX + swirl;
+        posAttr.array[i3 + 1] = basePos[i3 + 1] + moveY + gravity; // Directional move + falling
+        posAttr.array[i3 + 2] = basePos[i3 + 2] + moveZ + swirl;
+    }
+
+    posAttr.needsUpdate = true;
 
     // Update flower transform display
     const pos = flowerSystem.position;
