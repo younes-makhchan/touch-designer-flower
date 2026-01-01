@@ -50,7 +50,13 @@ document.body.appendChild(instructionsDiv);
 
 // --- MORPHING VARIABLES ---
 let startTime = Date.now();
-const cycleDuration = 6000; // 3 seconds total (1.5s out, 1.5s back)
+const cycleDuration = 3000; // 3 seconds total (1.5s out, 1.5s back)
+
+// --- CLUSTER DISPERSION CONTROLS ---
+const dispersionStrength =500.0; // How far clusters can move (higher = more spread)
+const escapeProbability = 0.4; // % of points in escape clusters that actually escape (0.0-1.0)
+const activeProbability = 0.3; // % of points in active clusters that are active (0.0-1.0)
+// Passive clusters always stay contained
 
 // --- MOUSE CONTROLS (OrbitControls) ---
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -64,7 +70,7 @@ function createDahlia() {
     const positions = [];
     const colors = [];
     const indices = [];
-    const rows = 90;  // Increased for smoothness
+    const rows = 300;  // Increased for smoothness
     const cols = 1200;
 
     for (let i = 0; i <= rows; i++) {
@@ -151,25 +157,82 @@ function createDahlia() {
     geometry.setAttribute('basePosition', new THREE.Float32BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
-    // Create random spherical directions and speeds for organic sand dispersion
-    const randomDirections = new Float32Array(positions.length);
+    // Create outward direction vectors based on position from center (radial burst)
+    const outwardDirs = new Float32Array(positions.length);
     const sandSpeeds = new Float32Array(positions.length / 3);
 
+    // Create clustered behavior - some groups escape, others stay contained
     for (let i = 0; i < positions.length; i += 3) {
-        // 1. Create a random unit vector (Direction) - spherical distribution
-        const theta = Math.random() * Math.PI * 2;
-        const phi = Math.acos((Math.random() * 2) - 1);
+        // 1. Calculate Outward Vector (Position - Center)
+        let vx = positions[i];
+        let vy = positions[i+1];
+        let vz = positions[i+2];
 
-        // Randomize the direction (X, Y, Z)
-        randomDirections[i]     = Math.sin(phi) * Math.cos(theta);
-        randomDirections[i + 1] = Math.sin(phi) * Math.sin(theta);
-        randomDirections[i + 2] = Math.cos(phi);
+        let mag = Math.sqrt(vx*vx + vy*vy + vz*vz);
 
-        // 2. Assign a speed (Some fall fast, some float)
-        sandSpeeds[i / 3] = 0.5 + Math.random() * 1.5;
+        // Create cluster behavior based on position
+        const clusterSeed = (i / 3) % 7; // 7 different cluster types
+        const isEscapeClusterType = clusterSeed < 2; // Only 2 out of 7 clusters try to escape
+        const isActiveClusterType = clusterSeed < 4; // 4 out of 7 clusters are more active
+
+        // Within each cluster type, only some points actually behave that way
+        let behavesAsEscape = false;
+        let behavesAsActive = false;
+        let behavesAsPassive = true; // Default
+
+        if (isEscapeClusterType && Math.random() < escapeProbability) {
+            behavesAsEscape = true;
+            behavesAsActive = false;
+            behavesAsPassive = false;
+        } else if (isActiveClusterType && Math.random() < activeProbability) {
+            behavesAsEscape = false;
+            behavesAsActive = true;
+            behavesAsPassive = false;
+        }
+        // Otherwise stays as passive (behavesAsPassive = true)
+
+        // Normalize for outward direction with individual point behavior
+        if (mag > 0.001) { // Avoid division by zero
+            const baseDirX = vx / mag;
+            const baseDirY = vy / mag;
+            const baseDirZ = vz / mag;
+
+            if (behavesAsEscape) {
+                // Individual escape points: move much further outward with high randomness
+                outwardDirs[i]     = baseDirX + (Math.random() - 0.5) * 2.0;
+                outwardDirs[i + 1] = baseDirY + (Math.random() - 0.5) * 2.0;
+                outwardDirs[i + 2] = baseDirZ + (Math.random() - 0.5) * 2.0;
+            } else if (behavesAsActive) {
+                // Individual active points: moderate movement
+                outwardDirs[i]     = baseDirX + (Math.random() - 0.5) * 1.0;
+                outwardDirs[i + 1] = baseDirY + (Math.random() - 0.5) * 1.0;
+                outwardDirs[i + 2] = baseDirZ + (Math.random() - 0.5) * 1.0;
+            } else {
+                // Passive points: stay more contained (most points)
+                outwardDirs[i]     = baseDirX * 0.5 + (Math.random() - 0.5) * 0.2;
+                outwardDirs[i + 1] = baseDirY * 0.5 + (Math.random() - 0.5) * 0.2;
+                outwardDirs[i + 2] = baseDirZ * 0.5 + (Math.random() - 0.5) * 0.2;
+            }
+        } else {
+            // Center points get random outward direction
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.acos((Math.random() * 2) - 1);
+            outwardDirs[i]     = Math.sin(phi) * Math.cos(theta);
+            outwardDirs[i + 1] = Math.sin(phi) * Math.sin(theta);
+            outwardDirs[i + 2] = Math.cos(phi);
+        }
+
+        // Speed based on individual point behavior
+        if (behavesAsEscape) {
+            sandSpeeds[i / 3] = 1.8 + Math.random() * 0.4; // Very fast escape points
+        } else if (behavesAsActive) {
+            sandSpeeds[i / 3] = 1.2 + Math.random() * 0.3; // Moderate speed
+        } else {
+            sandSpeeds[i / 3] = 0.6 + Math.random() * 0.2; // Slow passive points
+        }
     }
 
-    geometry.setAttribute('sandDir', new THREE.BufferAttribute(randomDirections, 3));
+    geometry.setAttribute('sandDir', new THREE.BufferAttribute(outwardDirs, 3));
     geometry.setAttribute('sandSpeed', new THREE.BufferAttribute(sandSpeeds, 1));
 
     geometry.computeVertexNormals();
@@ -209,12 +272,13 @@ const flowerMesh = new THREE.Mesh(geometry, meshMaterial);
 
 // 2. Create the Sand Points (for when it's blowing away)
 const pointsMaterial = new THREE.PointsMaterial({
-    size: 0.8,
-    vertexColors: true,
+    size: 2,                // Increased size for visibility
+    vertexColors: true,       // CRITICAL: This enables the flower colors
     transparent: true,
-    opacity: 0, // Start invisible
+    opacity: 0.8,
     blending: THREE.AdditiveBlending,
-    depthWrite: false
+    depthWrite: false,
+    sizeAttenuation: true     // Points get smaller as they move away from camera
 });
 
 const flowerPoints = new THREE.Points(geometry, pointsMaterial);
@@ -332,7 +396,7 @@ function animate() {
         flowerPoints.visible = true;
 
         // Cross-fade: Mesh disappears as Points take over
-        flowerMesh.material.opacity = Math.max(0.4, 1.0 - morphFactor * 2.0);
+        flowerMesh.material.opacity = Math.max(0.5, 1.0 - morphFactor * 2.0);
         flowerPoints.material.opacity = Math.min(1.0, morphFactor * 2.0);
     }
 
@@ -347,25 +411,40 @@ function animate() {
 
         // Timing: Add a slight delay based on height (Y) to make it "crumble" from top to bottom
         const heightDelay = (basePos[i3 + 1] + 200) / 400;
-        const individualMorph = Math.max(0, (morphFactor * sandSpeeds[i]) - (heightDelay * 0.2));
+        const individualMorph = Math.max(0, (morphFactor * sandSpeeds[i]) - (heightDelay * 0.4));
 
-        // Calculate movement based on the stored random direction
-        // Multiplier (80.0) controls how far the sand travels - reduced for closer dispersion
-        const travelDist = individualMorph * 20.0;
+        // Calculate radial distance from center for extreme distance-based scaling
+        const radialDistance = Math.sqrt(basePos[i3]**2 + basePos[i3+2]**2) / 300; // Normalized 0-1
+        const radialScale = Math.max(0.1, radialDistance * 10.0); // Inner points barely move (0.1x), outer points move 10x far!
 
-        const moveX = sandDirs[i3]     * travelDist;
-        const moveY = sandDirs[i3 + 1] * travelDist;
-        const moveZ = sandDirs[i3 + 2] * travelDist;
+        // Gentle outward flow like water dispersing from a sphere
+        const flowSpeed = individualMorph * 0.5; // Much gentler movement
+        const flowDist = flowSpeed * 8.0 * radialScale; // Radial scaling: outer points travel farther
 
-        // Add a "gravity" effect: sand starts to fall over time
-        const gravity = Math.pow(individualMorph, 2) * -50.0;
+        // Smooth radial movement outward
+        const moveX = sandDirs[i3]   * flowDist;
+        const moveY = sandDirs[i3 + 1] * flowDist * 0.3; // Reduced vertical movement
+        const moveZ = sandDirs[i3 + 2] * flowDist;
 
-        // Add a "swirl" to make it look like air currents
-        const swirl = Math.sin(elapsedTime * 0.002 + i) * 15.0 * individualMorph;
+        // Very gentle gravity, like particles slowly settling
+        const gravity = individualMorph * individualMorph * -15.0;
 
-        posAttr.array[i3]     = basePos[i3]     + moveX + swirl;
-        posAttr.array[i3 + 1] = basePos[i3 + 1] + moveY + gravity; // Directional move + falling
-        posAttr.array[i3 + 2] = basePos[i3 + 2] + moveZ + swirl;
+        // Subtle, flowing swirl like gentle currents
+        const swirlAngle = elapsedTime * 0.003 + i * 0.05; // Much slower, gentler rotation
+        const swirlStrength = individualMorph * 3.0; // Much weaker swirl
+
+        const swirlX = Math.cos(swirlAngle) * swirlStrength;
+        const swirlZ = Math.sin(swirlAngle) * swirlStrength;
+
+        // Create illusion of smooth disappearance by blending with original position
+        const blendFactor = 1.0 - (individualMorph * 0.7); // Keep some connection to original shape
+        const finalX = basePos[i3] * blendFactor + (basePos[i3] + moveX + swirlX) * (1.0 - blendFactor);
+        const finalY = basePos[i3 + 1] * blendFactor + (basePos[i3 + 1] + moveY + gravity) * (1.0 - blendFactor);
+        const finalZ = basePos[i3 + 2] * blendFactor + (basePos[i3 + 2] + moveZ + swirlZ) * (1.0 - blendFactor);
+
+        posAttr.array[i3]     = finalX;
+        posAttr.array[i3 + 1] = finalY;
+        posAttr.array[i3 + 2] = finalZ;
     }
 
     posAttr.needsUpdate = true;
