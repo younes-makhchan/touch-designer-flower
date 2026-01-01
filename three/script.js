@@ -60,20 +60,20 @@ function createDahlia() {
     const positions = [];
     const colors = [];
     const indices = [];
-    const rows = 100;  // Increased for smoothness
+    const rows = 90;  // Increased for smoothness
     const cols = 1200;
 
     for (let i = 0; i <= rows; i++) {
         const r = i / rows;
         for (let j = 0; j <= cols; j++) {
-            const theta = (j / cols) * (180 * 30);
+            const theta = (j / cols) * (180 * 45);
             const thetaRad = theta * Math.PI / 180;
 
             // --- THE ORIGINAL MATHEMATICAL FORMULA ---
-            const phi = (180 / 1.75) * Math.exp(-theta / (11 * 180));
-            const petalCut = 0.6 + Math.abs(Math.asin(Math.sin(4.75 * theta * Math.PI / 180)) + 420 * Math.sin(4.75 * theta * Math.PI / 180)) / 2000;
-            const hangDown = 2.3 * Math.pow(r, 2) * Math.pow(0.9 * r - 1, 2) * Math.sin(phi * Math.PI / 180);
-            const petalRadius = r * Math.sin(phi * Math.PI / 180) + hangDown * Math.cos(phi * Math.PI / 180);
+            const phi = (180 / 1.75) * Math.exp(-theta / (30 * 180));
+            const petalCut = 0.6 + Math.abs(Math.asin(Math.sin(4.75 * theta * Math.PI / 180)) + 420 * Math.sin(4.75 * theta * Math.PI / 180)) / 3000;
+            const hangDown = 3.5 * Math.pow(r, 2) * Math.pow(0.9 * r - 1, 2) * Math.sin(phi * Math.PI / 180);
+            const petalRadius = r * Math.sin(phi * Math.PI / 180) + hangDown * Math.cos(phi * Math.PI / 180) ;
 
             // Add organic imperfection for natural look
             const organicNoise = 1.0 + (Math.sin(theta * 0.5) * 0.025);
@@ -84,27 +84,46 @@ function createDahlia() {
 
             positions.push(pX, pY, pZ);
 
-            // --- SPECIFIC COLOR MAP ---
+            // --- SPIRAL-BASED COLOR ALGORITHM (True to Nature) ---
             const vColor = new THREE.Color();
 
-            // Determine "Center" vs "Outer" based on radius
-            if (r < 0.15) {
-                vColor.setHex(0x02612d); // Sage Green (softer than Forest Green)
-            } else if (r < 0.25) {
-                vColor.setHex(0xb31c04); // Dusty Rose/Deep Petal Red (softer than pure red)
-            } else {
-                // Outer petals logic based on position
-                const isRight = pX > 0;
-                const isTop = pY > 0;
+            // Define the key colors from the reference images
+            const colorCore = new THREE.Color(0x0a3d1a);   // Deep Green (tight center)
+            const colorHot = new THREE.Color(0xff4d6d);    // Vibrant Pink/Red
+            const colorWarm = new THREE.Color(0xffb703);   // Orange/Yellow
+            const colorCool = new THREE.Color(0x8ecae6);   // Sky Blue
+            const colorWhite = new THREE.Color(0xffffff);  // White tips
 
-                if (isRight && !isTop) {
-                    // Right Center: Light Blue to White
-                    vColor.lerpColors(new THREE.Color(0x19ffe0), new THREE.Color(0xcaeefc), r * 0.8);
+            if (r < 0.12) {
+                // Green center (tight biological core)
+                vColor.copy(colorCore);
+                // Quick transition to red as we leave the center
+                vColor.lerp(colorHot, r * 5);
+            } else {
+                // Spiral-based hue shift (follows logarithmic growth)
+                // Using sine waves to oscillate between Pink, Orange, and Blue
+                const huePicker = Math.sin(thetaRad * 0.1 + r * 2);
+
+                if (huePicker > 0.3) {
+                    vColor.copy(colorHot);
+                } else if (huePicker > -0.3) {
+                    vColor.lerpColors(colorHot, colorWarm, (huePicker + 0.3) / 0.6);
                 } else {
-                    // Top, Bottom, and Left: Sky Blue with White highlights
-                    vColor.lerpColors(new THREE.Color(0x14bbfc), new THREE.Color(0xcaeefc), r * 0.8);
+                    vColor.lerpColors(colorWarm, colorCool, Math.abs(huePicker));
                 }
+
+                // Radial gradient (Fade to white/light at petal tips)
+                // The image shows very light edges. We increase lightness as 'r' increases.
+                const tipLightness = Math.pow(r, 1.5);
+                vColor.lerp(colorWhite, tipLightness * 0.7);
             }
+
+            // Add "Pointillism" Noise (The grainy texture in the image)
+            const noise = (Math.random() - 0.5) * 0.15;
+            vColor.r = Math.max(0, Math.min(1, vColor.r + noise));
+            vColor.g = Math.max(0, Math.min(1, vColor.g + noise));
+            vColor.b = Math.max(0, Math.min(1, vColor.b + noise));
+
             colors.push(vColor.r, vColor.g, vColor.b);
         }
     }
@@ -141,10 +160,10 @@ const material = new THREE.MeshStandardMaterial({
     side: THREE.DoubleSide,
     transparent: true,    // Enable transparency for soft edges
     opacity: 0.85,        // Slightly see-through
-    roughness: 0.0,       // High roughness = soft matte look (no metal shine)
+    roughness: -0.2,       // High roughness = soft matte look (no metal shine)
     metalness: 0.0,       // 0 metalness for organic feel
     emissive: new THREE.Color(0xffffff),
-    emissiveIntensity: 0.2, // Very low glow for gentle effect
+    emissiveIntensity: 0.2 // Very low glow for gentle effect
 });
 
 // Update the shader to keep the soft glow on the colors
@@ -228,14 +247,16 @@ document.addEventListener('keydown', (event) => {
 scene.add(flowerSystem);
 
 // 4. Gentle Lighting Setup
-// Soft Ambient for base visibility
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
-scene.add(ambientLight);
+// 1. Hemisphere Light: Provides a sky/ground color gradient.
+// This ensures that even the "back" parts have a subtle blue or green tint.
+const hemiLight = new THREE.HemisphereLight(0x40e0d0, 0xff0000, 0.5); // Cyan sky, Red ground
+scene.add(hemiLight);
 
-// Gentle Key Light (White)
-const topLight = new THREE.PointLight(0xffffff, 1, 250);
-topLight.position.set(20, 50, 100);
-scene.add(topLight);
+// 2. Main Directional Light: Follows the camera so the front is always lit
+const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+dirLight.position.set(0, 0, 1); // Pointing directly at the scene from the camera
+camera.add(dirLight); // Adding it to the camera makes the light move with your view
+scene.add(camera);
 
 // 5. Animation Loop
 function animate() {
