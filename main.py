@@ -8,44 +8,49 @@ from OpenGL.GLU import *
 
 # ---------------- CONFIG ----------------
 WIDTH, HEIGHT = 900, 700
-ROWS = 40
 SCALE = 0.0074
-ROTATION_SPEED = 0.5
 
 class Flower:
     def __init__(self):
-        self.points, self.colors = self._generate_data()
+        self.points, self.colors, self.seeds = self._generate_data()
 
     def _generate_data(self):
         points = []
         colors = []
-        for r_val in np.arange(0, 1.01, 0.025):
-            for theta in np.arange(0, 180 * 20, 3.0):
-                phi = (180 / 2) * math.exp(-theta / (16 * 180))
-                phi_rad = math.radians(phi)
-                theta_rad = math.radians(theta)
-                petalCut = 0.75 + abs(math.asin(math.sin(math.radians(2.75 * theta))))
-                hangDown = 1.3 * math.pow(r_val, 2) * math.pow(1.25 * r_val - 1, 2) * math.sin(phi_rad)
-                taper = (1 - theta / 6500)
-                common = taper * petalCut * (r_val * math.sin(phi_rad) + hangDown * math.cos(phi_rad))
+        seeds = [] # Random directions for "sand" dispersion
+        
+        # High density resolution
+        for x_val in np.arange(0, 1.0, 0.015): 
+            for theta in np.arange(-2 * math.pi, 15 * math.pi, 0.05):
+                # 1. ROSE MATHEMATICS
+                phi = (math.pi / 2) * math.exp(-theta / (8 * math.pi))
+                mod_val = (3.6 * theta) % (2 * math.pi)
+                X_expr = 1 - 0.5 * math.pow(1.25 * math.pow(1 - mod_val / math.pi, 2) - 0.25, 2)
+                y_val = 1.95653 * math.pow(x_val, 2) * math.pow(1.27689 * x_val - 1, 2) * math.sin(phi)
+                r = X_expr * (x_val * math.sin(phi) + y_val * math.cos(phi))
+                
+                # Coordinates
+                pX = r * math.sin(theta) * 3.5
+                pZ = r * math.cos(theta) * 3.5
+                pY = X_expr * (x_val * math.cos(phi) - y_val * math.sin(phi)) * 3.5
 
-                pX = 300 * common * math.sin(theta_rad) * SCALE
-                pZ = 300 * common * math.cos(theta_rad) * SCALE
-                pY = 300 * taper * petalCut * (r_val * math.cos(phi_rad) - hangDown * math.sin(phi_rad)) * SCALE
+                points.append([pX, pY, pZ, x_val])
+                
+                # 2. SEED FOR SAND (Unique random vector for each point)
+                seeds.append([
+                    math.sin(len(points) * 0.13) * 2.5,
+                    math.cos(len(points) * 0.29) * 2.5,
+                    math.sin(len(points) * 0.51) * 2.5
+                ])
 
-                points.append([pX, pY, pZ, r_val])
-
-                # Pre-calc Colors
-                color_top = np.array([1.0, 0.2, 0.4])
-                color_bottom = np.array([0.5, 0.0, 1.0])
-                color_side = np.array([0.0, 0.6, 1.0])
-
-                yw, ynw, sw = max(0, pY), max(0, -pY), max(0, abs(pX))
-                total = yw + ynw + sw
-                mixed = (color_top * yw + color_bottom * ynw + color_side * sw) / (total if total > 0 else 1)
+                # 3. COLORS (Pink/Purple/Blue palette)
+                c_outer = np.array([1.0, 0.3, 0.5]) # Pink
+                c_inner = np.array([0.4, 0.1, 0.8]) # Purple
+                # Mix based on radius (x_val)
+                mixed = c_outer * x_val + c_inner * (1 - x_val)
                 colors.append(mixed)
 
-        return np.array(points, dtype=np.float32), np.array(colors, dtype=np.float32)
+        return np.array(points), np.array(colors), np.array(seeds)
 
 class Renderer:
     def __init__(self):
@@ -63,78 +68,63 @@ class Renderer:
         glClearColor(0, 0, 0, 1)
         glEnable(GL_DEPTH_TEST)
         glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE) # Additive blending for glow
         glEnable(GL_POINT_SMOOTH)
 
     def draw(self, flower, time_elapsed, rotation_angle, morph_factor, texture):
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         glLoadIdentity()
 
-        # 1. Camera Depth
+        # CAMERA SETUP
         glTranslatef(0, -1.0, -15)
+        
+        # ROTATION LOGIC: Hand spins the whole scene on Y-axis
+        glRotatef(rotation_angle, 0, 1, 0)
+        glRotatef(20, 1, 1, 0) # Perspective Tilt
+        glRotatef(35, 1, 0, 0) # Face Tilt
 
-        # 2. THE REQUESTED TILT: 20 degrees between XY and XZ planes
-        glRotatef(20, 1, 1, 0)
-
-        # 3. BASE ORIENTATION (To see the flower face)
-        glRotatef(35, 1, 0, 0)
-
-        # 4. HAND CONTROLLED ROTATION (Now on Z-Axis)
-        glRotatef(rotation_angle, 0, 0, 1)
-
-        glPointSize(2.0)
+        glPointSize(1.5) # Smaller points = more sand-like
         glBegin(GL_POINTS)
 
         for i in range(len(flower.points)):
             p = flower.points[i]
-            orig_x, orig_y, orig_z, r_val = p
+            orig_x, orig_y, orig_z, x_val = p
+            seed = flower.seeds[i]
 
-            # Sequential melting based on hand control
-            local_morph = max(0, morph_factor - (1.0 - r_val) * 0.7)
-            wave = time_elapsed * 0.8
+            # SAND MORPH: Points disperse in random directions
+            # Outer petals (high x_val) break off first
+            local_morph = max(0, morph_factor - (1.0 - x_val) * 0.4)
+            local_morph = math.pow(local_morph, 1.5) # Snappy dispersion
 
-            dx = orig_x + math.sin(orig_y * 1.2 + wave) * 2.5 * local_morph
-            dy = orig_y - (r_val * 6.0 * local_morph) + math.cos(orig_x * 1.2 + wave) * local_morph
-            dz = orig_z + math.sin(orig_x * 1.2 + wave) * 2.5 * local_morph
+            # Apply random seed + slight turbulence
+            drift = math.sin(time_elapsed + orig_y) * 0.3
+            dx = orig_x + (seed[0] + drift) * local_morph * 6.0
+            dy = orig_y + (seed[1]) * local_morph * 6.0
+            dz = orig_z + (seed[2] + drift) * local_morph * 6.0
 
-            # White glow
-            dist = math.sqrt(dx*dx + dy*dy + dz*dz) / 4.0
-            white_f = math.pow(max(0, 1.0 - dist), 1.5)
+            # SHARP CORE GLOW: Tighter white core in the middle
+            dist = math.sqrt(dx*dx + dy*dy + dz*dz) / 5.0
+            white_f = math.pow(max(0, 1.0 - dist), 5.0) * (1.0 - local_morph)
 
             c = flower.colors[i]
-            fr, fg, fb = c * (1 - white_f) + white_f
-            alpha = 0.65 * (1.0 - local_morph * 0.3)
+            fr, fg, fb = c * (1.0 - white_f) + white_f
+            
+            # Fade as it disperses
+            alpha = 0.5 * (1.0 - local_morph * 0.6)
 
             glColor4f(fr, fg, fb, alpha)
             glVertex3f(dx, dy, dz)
 
         glEnd()
 
-        # Draw camera overlay
-        glMatrixMode(GL_PROJECTION)
-        glPushMatrix()
-        glLoadIdentity()
-        glOrtho(0, WIDTH, 0, HEIGHT, -1, 1)
-        glMatrixMode(GL_MODELVIEW)
-        glPushMatrix()
-        glLoadIdentity()
-        glDisable(GL_DEPTH_TEST)
-        glDisable(GL_LIGHTING)
-        glEnable(GL_TEXTURE_2D)
-        glBindTexture(GL_TEXTURE_2D, texture)
-        glBegin(GL_QUADS)
-        glTexCoord2f(0, 0); glVertex2f(10, HEIGHT - 210)
-        glTexCoord2f(1, 0); glVertex2f(310, HEIGHT - 210)
-        glTexCoord2f(1, 1); glVertex2f(310, HEIGHT - 10)
-        glTexCoord2f(0, 1); glVertex2f(10, HEIGHT - 10)
-        glEnd()
-        glDisable(GL_TEXTURE_2D)
-        glEnable(GL_DEPTH_TEST)
-        glMatrixMode(GL_PROJECTION)
-        glPopMatrix()
-        glMatrixMode(GL_MODELVIEW)
-        glPopMatrix()
-
+        # UI Overlay (Simplified for brevity)
+        glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity(); glOrtho(0, WIDTH, 0, HEIGHT, -1, 1)
+        glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity(); glDisable(GL_DEPTH_TEST); glEnable(GL_TEXTURE_2D)
+        glBindTexture(GL_TEXTURE_2D, texture); glBegin(GL_QUADS)
+        glTexCoord2f(0, 0); glVertex2f(10, HEIGHT-210); glTexCoord2f(1, 0); glVertex2f(310, HEIGHT-210)
+        glTexCoord2f(1, 1); glVertex2f(310, HEIGHT-10); glTexCoord2f(0, 1); glVertex2f(10, HEIGHT-10)
+        glEnd(); glDisable(GL_TEXTURE_2D); glEnable(GL_DEPTH_TEST); glMatrixMode(GL_PROJECTION); glPopMatrix()
+        glMatrixMode(GL_MODELVIEW); glPopMatrix()
         pygame.display.flip()
 
 class HandTracker:
