@@ -22,7 +22,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
-camera.position.set(40, -60, 700);
+camera.position.set(40, -60, 900);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -33,6 +33,123 @@ const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 
 let startTime = Date.now();
+let lastTime = startTime;
+
+// Hand Tracking Setup
+const videoElement = document.getElementById('webcam');
+const canvasElement = document.getElementById('output_canvas');
+const canvasCtx = canvasElement.getContext('2d');
+let hands, camera_utils;
+let leftDist = 0, rightDist = 0;
+let prevLeftDist = 0;
+let prevRightDist = 0;
+let currentRotation = 0;
+let rotationVelocity = 0;
+let targetMorph = 0;
+let currentMorph = 0;
+
+// Audio setup
+const backgroundAudio = new Audio('../background.mp3');
+backgroundAudio.loop = true;
+backgroundAudio.volume = 0.3; // Quiet background
+
+const pulseAudio = new Audio('../pow.mpeg');
+pulseAudio.volume = 0.7;
+
+// Sensitivity settings - adjusted for better responsiveness
+const minDistMorph = 0.02;
+const maxDistMorph = 0.15;
+const minDistRot = 0.02;
+const maxDistRot = 0.20;
+
+// Initialize MediaPipe Hands
+async function initHands() {
+    hands = new Hands({
+        locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }
+    });
+
+    hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5
+    });
+
+    hands.onResults(onResults);
+
+    camera_utils = new Camera(videoElement, {
+        onFrame: async () => {
+            await hands.send({ image: videoElement });
+        },
+        width: 640,
+        height: 480
+    });
+
+    await camera_utils.start();
+
+    // Start background audio
+    backgroundAudio.play().catch(e => console.log('Audio play failed:', e));
+}
+
+function onResults(results) {
+    // Draw on canvas
+    canvasCtx.save();
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+    if (results.multiHandLandmarks && results.multiHandedness) {
+        for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+            const handedness = results.multiHandedness[i].label;
+            const landmarks = results.multiHandLandmarks[i];
+            const color = handedness === 'Left' ? '#0000FF' : '#00FF00'; // Blue for left, Green for right
+
+            // Draw only thumb and index landmarks
+            const thumb = landmarks[4];
+            const index = landmarks[8];
+
+            canvasCtx.strokeStyle = color;
+            canvasCtx.lineWidth = 3;
+            canvasCtx.beginPath();
+            canvasCtx.moveTo(thumb.x * canvasElement.width, thumb.y * canvasElement.height);
+            canvasCtx.lineTo(index.x * canvasElement.width, index.y * canvasElement.height);
+            canvasCtx.stroke();
+
+            canvasCtx.fillStyle = '#FF0000';
+            canvasCtx.beginPath();
+            canvasCtx.arc(thumb.x * canvasElement.width, thumb.y * canvasElement.height, 5, 0, 2 * Math.PI);
+            canvasCtx.fill();
+
+            canvasCtx.beginPath();
+            canvasCtx.arc(index.x * canvasElement.width, index.y * canvasElement.height, 5, 0, 2 * Math.PI);
+            canvasCtx.fill();
+        }
+    }
+    canvasCtx.restore();
+
+    // Calculate distances
+    leftDist = 0;
+    rightDist = 0;
+
+    if (results.multiHandLandmarks && results.multiHandedness) {
+        for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+            const handedness = results.multiHandedness[i].label;
+            const landmarks = results.multiHandLandmarks[i];
+            
+            const thumb = landmarks[4];
+            const index = landmarks[8];
+            const dist = Math.hypot(thumb.x - index.x, thumb.y - index.y);
+
+            if (handedness === 'Left') {
+                leftDist = dist;
+            } else if (handedness === 'Right') {
+                rightDist = dist;
+            }
+        }
+    }
+}
+
+initHands();
 
 // 2. The Merged Generator
 function createDahlia(steps = 34, ts = 360) {
@@ -105,7 +222,7 @@ function createDahlia(steps = 34, ts = 360) {
     return geo;
 }
 
-const geometry = createDahlia(34, 360);       // Low-res for Mesh
+const geometry = createDahlia(80, 360);       // Low-res for Mesh
 const geometry1 = createDahlia(500, 800);    // High-res for Points
 
 // 3. Materials - Adjusted for "Glow & Grit"
@@ -184,15 +301,51 @@ function animate() {
     requestAnimationFrame(animate);
     controls.update();
 
-    const totalElapsed = Date.now() - startTime;
-    const progress = (totalElapsed % params.cycleDuration) / params.cycleDuration;
-    const factor = Math.pow((Math.sin(progress * Math.PI * 2 - Math.PI / 2) + 1) / 2, 1.2);
+    const now = Date.now();
+    const dt = (now - lastTime) / 1000.0;
+    lastTime = now;
+
+    const totalElapsed = now - startTime;
+
+    // --- 1. SMOOTH MORPH (Right Hand) ---
+    targetMorph = 0.0;
+    if (rightDist > minDistMorph) {
+        targetMorph = (rightDist - minDistMorph) / (maxDistMorph - minDistMorph);
+        targetMorph = Math.min(targetMorph, 1.0);
+    }
+    currentMorph += (targetMorph - currentMorph) * 4.0 * dt;
+
+    // --- 2. PULSE ROTATION (Left Hand) with smooth fade ---
+    if (leftDist < prevLeftDist && leftDist < 0.08) {
+        // Play pulse sound
+        pulseAudio.currentTime = 0;
+        pulseAudio.play().catch(e => console.log('Pulse audio failed:', e));
+
+        const pulseAmount = (prevLeftDist - leftDist) * 3000.0; // Scale the pulse - stronger when closing
+        rotationVelocity += pulseAmount * Math.PI / 180; // Add to velocity
+    } else if (leftDist > prevLeftDist) {
+        // Opening fingers - immediate smooth stop
+        rotationVelocity *= 0.9; // Stronger decay when stopping
+    }
+    prevLeftDist = leftDist;
+
+    // Apply velocity with decay for smooth motion
+    currentRotation += rotationVelocity * dt;
+    rotationVelocity *= 0.97; // Decay factor for fade out
+
+    flowerSystem.rotation.z = currentRotation;
+
+    // Adjust pulse audio volume based on rotation velocity
+    if (!pulseAudio.paused) {
+        pulseAudio.volume = Math.max(0.1, Math.min(0.2, rotationVelocity / 3.5));
+    }
+
+    // Use hand-controlled morph factor
+    const factor = currentMorph;
 
     // Dynamic Opacity
     meshMaterial.opacity = THREE.MathUtils.lerp(1.0, params.minMeshOpacity, factor);
     pointsMaterial.opacity = THREE.MathUtils.lerp(0.0, 1.0, factor);
-
-    const fixedTime = progress * params.cycleDuration;
 
     updateOctopusPositions(geometry.attributes.position, geometry.attributes.basePosition.array, geometry.attributes.sandDir.array, factor, totalElapsed);
     updateOctopusPositions(geometry1.attributes.position, geometry1.attributes.basePosition.array, geometry1.attributes.sandDir.array, factor, totalElapsed);
