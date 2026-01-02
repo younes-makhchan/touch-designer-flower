@@ -7,11 +7,11 @@ const params = {
     minMeshOpacity: 0.2,    // Flower disappears completely when shredded
     
     // WHIP & NOISE PARAMS
-    expansionForce: 0.4,    // Outward push
+    expansionForce: 0.8,    // Outward push
     shredDrift: 1.0,       // Local "grainy" jitter
-    noiseFrequency: 0.5,  // The "curliness" of the filaments
+    noiseFrequency: 0.3,  // The "curliness" of the filaments
     noiseAmplitude: 100.0,  // How violently they whip
-    chaosSpeed: 0.002,      // Speed of noise evolution
+    chaosSpeed: 0.001,      // Speed of noise evolution
     
     // RENDERING
     pointSize: 2.4          // Small points = more "abstract/wispy"
@@ -22,7 +22,7 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
-camera.position.set(40, -60, 900);
+camera.position.set(40, -60, 1200);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -51,14 +51,17 @@ let currentMorph = 0;
 // Audio setup
 const backgroundAudio = new Audio('../background.mp3');
 backgroundAudio.loop = true;
-backgroundAudio.volume = 0.3; // Quiet background
+backgroundAudio.volume = 0.5; // Quiet background
 
 const pulseAudio = new Audio('../pow.mpeg');
 pulseAudio.volume = 0.7;
 
-// Sensitivity settings - adjusted for better responsiveness
-const minDistMorph = 0.02;
-const maxDistMorph = 0.15;
+const morphAudio = new Audio('../swosh.mpeg');
+morphAudio.volume = 0.7;
+
+// Sensitivity settings - adjusted for easier max morph triggering
+const minDistMorph = 0.05; // Ignore tiny twitches
+const maxDistMorph = 0.12; // Reach peak faster (around 60-70% hand stretch)
 const minDistRot = 0.02;
 const maxDistRot = 0.20;
 
@@ -261,14 +264,17 @@ dirLight.position.set(0, 0, 1);
 camera.add(dirLight);
 
 scene.add(camera);
+let stuckTime = 0
 
 // 5. Physics Engine (Octopus Whip Logic)
 function updateOctopusPositions(attr, baseArr, sandArr, factor, time) {
     const pos = attr.array;
     const count = attr.count;
-    const t = time * params.chaosSpeed;
+    if(factor < 0.985){
+        stuckTime = time
+    }
+    const t = stuckTime * params.chaosSpeed ;
     const f = params.noiseFrequency;
-
     for (let i = 0; i < count; i++) {
         const i3 = i * 3;
         const bx = baseArr[i3];
@@ -307,13 +313,27 @@ function animate() {
 
     const totalElapsed = now - startTime;
 
-    // --- 1. SMOOTH MORPH (Right Hand) ---
+    // --- 1. SMOOTH MORPH (Right Hand) with max lock ---
     targetMorph = 0.0;
     if (rightDist > minDistMorph) {
         targetMorph = (rightDist - minDistMorph) / (maxDistMorph - minDistMorph);
         targetMorph = Math.min(targetMorph, 1.0);
     }
+
+    // Morph increases smoothly, but locks at max until significantly reduced
     currentMorph += (targetMorph - currentMorph) * 4.0 * dt;
+       
+    // Play morph sound when morph is active
+    if (currentMorph > 0.1) {
+        if (morphAudio.paused) {
+            morphAudio.currentTime = 0;
+            morphAudio.play().catch(e => console.log('Morph audio failed:', e));
+        }
+    } else {
+        morphAudio.pause();
+        morphAudio.currentTime = 0;
+    }
+    prevRightDist = rightDist;
 
     // --- 2. PULSE ROTATION (Left Hand) with smooth fade ---
     if (leftDist < prevLeftDist && leftDist < 0.08) {
@@ -332,6 +352,11 @@ function animate() {
     // Apply velocity with decay for smooth motion
     currentRotation += rotationVelocity * dt;
     rotationVelocity *= 0.97; // Decay factor for fade out
+
+    // Slow down rotation when morphing to highlight the morph effect
+    if (currentMorph > 0.1) {
+        rotationVelocity *= 0.9; // Additional friction when morphing
+    }
 
     flowerSystem.rotation.z = currentRotation;
 
