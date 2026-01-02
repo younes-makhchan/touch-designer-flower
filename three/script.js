@@ -3,18 +3,18 @@
  * Adjust these to fine-tune the "Whip" and "Grit" levels
  */
 const params = {
-    cycleDuration: 4000,    // Slower cycle to see the noise move
+    cycleDuration: 2000,    // Slower cycle to see the noise move
     minMeshOpacity: 0.2,    // Flower disappears completely when shredded
     
     // WHIP & NOISE PARAMS
-    expansionForce: 0.8,    // Outward push
-    shredDrift: 1.0,       // Local "grainy" jitter
-    noiseFrequency: 0.3,  // The "curliness" of the filaments
-    noiseAmplitude: 100.0,  // How violently they whip
-    chaosSpeed: 0.001,      // Speed of noise evolution
+    expansionForce: 1,    // Outward push
+    shredDrift: 5,       // Local "grainy" jitter
+    noiseFrequency: 40,  // The "curliness" of the filaments
+    noiseAmplitude: 15.0,  // How violently they whip
+    chaosSpeed: 0.005,      // Speed of noise evolution
     
     // RENDERING
-    pointSize: 2.4          // Small points = more "abstract/wispy"
+    pointSize: 3.4      // Small points = more "abstract/wispy"
 };
 
 // 1. Scene Setup
@@ -155,78 +155,125 @@ function onResults(results) {
 initHands();
 
 // 2. The Merged Generator
-function createDahlia(steps = 34, ts = 360) {
+function createDahlia(steps = 90, ts = 1200) {
     const positions = [];
     const colors = [];
     const indices = [];
-    const sandDirs = [];
+    const rows = steps;
+    const cols = ts;
 
-    const rSteps = steps;
-    const thetaSteps = ts;
 
-    const colorCore = new THREE.Color(0x0a3d1a);
-    const colorHot = new THREE.Color(0xff4d6d);
-    const colorWarm = new THREE.Color(0xffb703);
-    const colorCool = new THREE.Color(0x8ecae6);
-    const colorWhite = new THREE.Color(0xffffff);
-
-    for (let i = 0; i <= rSteps; i++) {
-        const r = i / rSteps;
-        for (let j = 0; j <= thetaSteps; j++) {
-            const theta = (j / thetaSteps) * (180 * 30);
+    for (let i = 0; i <= rows; i++) {
+        const r = i / rows;
+        for (let j = 0; j <= cols; j++) {
+            const theta = (j / cols) * (180 * 45);
             const thetaRad = theta * Math.PI / 180;
 
+            // --- THE ORIGINAL MATHEMATICAL FORMULA ---
             const phi = (180 / 1.75) * Math.exp(-theta / (11 * 180));
-            const petalCut = 0.6 + Math.abs(Math.asin(Math.sin(9.75563 * theta * Math.PI / 180)) + 450 * Math.sin(9.75563 * theta * Math.PI / 180)) / 2000;
-            const hangDown = 2.3 * Math.pow(r, 2) * Math.pow(0.9 * r - 1, 2) * Math.sin(phi * Math.PI / 180);
-            const petalRadius = r * Math.sin(phi * Math.PI / 180) + hangDown * Math.cos(phi * Math.PI / 180);
+            const petalCut = 0.6 + Math.abs(Math.asin(Math.sin(9.75 * theta * Math.PI / 180)) + 420 * Math.sin(9.75 * theta * Math.PI / 180)) / 3000;
+            const hangDown = 3.5 * Math.pow(r, 2) * Math.pow(0.9 * r - 1, 2) * Math.sin(phi * Math.PI / 180);
+            const petalRadius = r * Math.sin(phi * Math.PI / 180) + hangDown * Math.cos(phi * Math.PI / 180) ;
 
-            const factor = 300 * (1 - theta / 20000) * petalCut;
+            // Add organic imperfection for natural look
+            const organicNoise = 1.0 + (Math.sin(theta * 0.5) * 0.025);
+            const factor = 300 * (1 - theta / 20000) * petalCut * organicNoise;
             const pX = factor * petalRadius * Math.sin(thetaRad);
-            const pY = -factor * (r * Math.cos(phi * Math.PI / 180) - hangDown * Math.sin(phi * Math.PI / 180));
+            const pY = -factor *0.4* (r * Math.cos(phi * Math.PI / 180) - hangDown * Math.sin(phi * Math.PI / 180));
             const pZ = factor * petalRadius * Math.cos(thetaRad);
 
             positions.push(pX, pY, pZ);
 
+            // --- SPIRAL-BASED COLOR ALGORITHM (True to Nature) ---
             const vColor = new THREE.Color();
-            if (r < 0.12) {
-                vColor.copy(colorCore).lerp(colorHot, r * 5);
-            } else {
-                const huePicker = Math.sin(thetaRad * 0.1 + r * 2);
-                if (huePicker > 0.3) vColor.copy(colorHot);
-                else if (huePicker > -0.3) vColor.lerpColors(colorHot, colorWarm, (huePicker + 0.3) / 0.6);
-                else vColor.lerpColors(colorWarm, colorCool, Math.abs(huePicker));
-                vColor.lerp(colorWhite, Math.pow(r, 1.5) * 0.7);
-            }
-            colors.push(vColor.r, vColor.g, vColor.b);
 
-            const mag = Math.sqrt(pX*pX + pY*pY + pZ*pZ) || 1;
-            sandDirs.push(pX/mag + (Math.random()-0.5), pY/mag + (Math.random()-0.5), pZ/mag + (Math.random()-0.5));
+            // Define the key colors from the reference images
+            const colorCore = new THREE.Color(0x0a3d1a);   // Deep Green (tight center)
+            const colorHot = new THREE.Color(0xff4d6d);    // Vibrant Pink/Red
+            const colorWarm = new THREE.Color(0xffb703);   // Orange/Yellow
+            const colorCool = new THREE.Color(0x8ecae6);   // Sky Blue
+            const colorWhite = new THREE.Color(0xffffff);  // White tips
+
+            if (r < 0.12) {
+                // Green center (tight biological core)
+                vColor.copy(colorCore);
+                // Quick transition to red as we leave the center
+                vColor.lerp(colorHot, r * 5);
+            } else {
+                // Spiral-based hue shift (follows logarithmic growth)
+                // Using sine waves to oscillate between Pink, Orange, and Blue
+                const huePicker = Math.sin(thetaRad * 0.1 + r * 2);
+
+                if (huePicker > 0.3) {
+                    vColor.copy(colorHot);
+                } else if (huePicker > -0.3) {
+                    vColor.lerpColors(colorHot, colorWarm, (huePicker + 0.3) / 0.6);
+                } else {
+                    vColor.lerpColors(colorWarm, colorCool, Math.abs(huePicker));
+                }
+
+                // Radial gradient (Fade to white/light at petal tips)
+                // The image shows very light edges. We increase lightness as 'r' increases.
+                const tipLightness = Math.pow(r, 1.5);
+                vColor.lerp(colorWhite, tipLightness * 0.7);
+            }
+
+            // Add "Pointillism" Noise (The grainy texture in the image)
+            const noise = (Math.random() - 0.5) * 0.15;
+            vColor.r = Math.max(0, Math.min(1, vColor.r + noise));
+            vColor.g = Math.max(0, Math.min(1, vColor.g + noise));
+            vColor.b = Math.max(0, Math.min(1, vColor.b + noise));
+
+            colors.push(vColor.r, vColor.g, vColor.b);
         }
     }
 
-    for (let i = 0; i < rSteps; i++) {
-        for (let j = 0; j < thetaSteps; j++) {
-            const a = i * (thetaSteps + 1) + j;
-            const b = i * (thetaSteps + 1) + j + 1;
-            const c = (i + 1) * (thetaSteps + 1) + j + 1;
-            const d = (i + 1) * (thetaSteps + 1) + j;
+    // Generate Mesh Indices
+    for (let i = 0; i < rows; i++) {
+        for (let j = 0; j < cols; j++) {
+            const a = i * (cols + 1) + j;
+            const b = i * (cols + 1) + j + 1;
+            const c = (i + 1) * (cols + 1) + j + 1;
+            const d = (i + 1) * (cols + 1) + j;
             indices.push(a, b, d, b, c, d);
         }
     }
 
-    const geo = new THREE.BufferGeometry();
-    geo.setIndex(indices);
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setAttribute('basePosition', new THREE.Float32BufferAttribute(positions, 3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-    geo.setAttribute('sandDir', new THREE.Float32BufferAttribute(sandDirs, 3));
-    geo.computeVertexNormals();
-    return geo;
+    // Store original positions and create sand dispersion seeds
+    const geometry = new THREE.BufferGeometry();
+    geometry.setIndex(indices);
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    // Store original positions for the morph back
+    geometry.setAttribute('basePosition', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+
+    // Create random spherical directions and speeds for organic sand dispersion
+    const randomDirections = new Float32Array(positions.length);
+    const sandSpeeds = new Float32Array(positions.length / 3);
+
+    for (let i = 0; i < positions.length; i += 3) {
+        // 1. Create a random unit vector (Direction) - spherical distribution
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos((Math.random() * 2) - 1);
+
+        // Randomize the direction (X, Y, Z)
+        randomDirections[i]     = Math.sin(phi) * Math.cos(theta);
+        randomDirections[i + 1] = Math.sin(phi) * Math.sin(theta);
+        randomDirections[i + 2] = Math.cos(phi);
+
+        // 2. Assign a speed (Some fall fast, some float)
+        sandSpeeds[i / 3] = 0.5 + Math.random() * 1.5;
+    }
+
+    geometry.setAttribute('sandDir', new THREE.BufferAttribute(randomDirections, 3));
+    geometry.setAttribute('sandSpeed', new THREE.BufferAttribute(sandSpeeds, 1));
+
+    geometry.computeVertexNormals();
+    return geometry;
 }
 
-const geometry = createDahlia(120, 500);       // Low-res for Mesh
-const geometry1 = createDahlia(500, 800);    // High-res for Points
+const geometry = createDahlia(90, 1200);       // Low-res for Mesh
+const geometry1 = createDahlia(800, 800);    // High-res for Points
 
 // 3. Materials - Adjusted for "Glow & Grit"
 const meshMaterial = new THREE.MeshStandardMaterial({
@@ -255,9 +302,9 @@ flowerSystem.rotation.x = 265 * Math.PI / 180;
 scene.add(flowerSystem);
 
 // 4. Lighting
-scene.add(new THREE.HemisphereLight(0x40e0d0, 0xff0000, 0.5));
+scene.add(new THREE.HemisphereLight(0x40e0d0, 0xff0000, 0.3));
 
-const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
 
 dirLight.position.set(0, 0, 1);
 
@@ -370,7 +417,7 @@ function animate() {
 
     // Dynamic Opacity
     meshMaterial.opacity = THREE.MathUtils.lerp(1.0, params.minMeshOpacity, factor);
-    pointsMaterial.opacity = THREE.MathUtils.lerp(0.0, 1.0, factor);
+    pointsMaterial.opacity = THREE.MathUtils.lerp(0.0, 0.9, factor);
 
     updateOctopusPositions(geometry.attributes.position, geometry.attributes.basePosition.array, geometry.attributes.sandDir.array, factor, totalElapsed);
     updateOctopusPositions(geometry1.attributes.position, geometry1.attributes.basePosition.array, geometry1.attributes.sandDir.array, factor, totalElapsed);
