@@ -177,7 +177,7 @@ function createDahlia(steps = 34, ts = 360) {
             const thetaRad = theta * Math.PI / 180;
 
             const phi = (180 / 1.75) * Math.exp(-theta / (11 * 180));
-            const petalCut = 0.6 + Math.abs(Math.asin(Math.sin(4.75 * theta * Math.PI / 180)) + 420 * Math.sin(4.75 * theta * Math.PI / 180)) / 2000;
+            const petalCut = 0.6 + Math.abs(Math.asin(Math.sin(9.75563 * theta * Math.PI / 180)) + 450 * Math.sin(9.75563 * theta * Math.PI / 180)) / 2000;
             const hangDown = 2.3 * Math.pow(r, 2) * Math.pow(0.9 * r - 1, 2) * Math.sin(phi * Math.PI / 180);
             const petalRadius = r * Math.sin(phi * Math.PI / 180) + hangDown * Math.cos(phi * Math.PI / 180);
 
@@ -225,7 +225,7 @@ function createDahlia(steps = 34, ts = 360) {
     return geo;
 }
 
-const geometry = createDahlia(80, 360);       // Low-res for Mesh
+const geometry = createDahlia(120, 500);       // Low-res for Mesh
 const geometry1 = createDahlia(500, 800);    // High-res for Points
 
 // 3. Materials - Adjusted for "Glow & Grit"
