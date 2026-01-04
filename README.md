@@ -11,7 +11,7 @@ A interactive 3D flower visualization using Three.js and MediaPipe Hand Tracking
 - **High-Res Video**: Full-screen HD webcam (1280x720) behind 3D scene for recording.
 
 ## Demo
-https://raw.githubusercontent.com/younes-makhchan/touch-designer-flower/master/assets/demo/demo.mp4
+https://user-images.githubusercontent.com/74161217/531730370-45c1f903-89b6-47e0-842b-9f7ca7d11e70.mp4
 
 A short video demo showing hand gestures controlling the interactive flower visualization.
 
