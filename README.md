@@ -10,6 +10,11 @@ A interactive 3D flower visualization using Three.js and MediaPipe Hand Tracking
 - **Visual Overlays**: "Particle" label on right hand, "Spin" flash on left during pulse.
 - **High-Res Video**: Full-screen HD webcam (1280x720) behind 3D scene for recording.
 
+## Demo
+<video src="./assets/demo/demo.mp4" controls preload></video>
+
+A short video demo showing hand gestures controlling the interactive flower visualization.
+
 ## Project Structure
 ```
 touch-designer-flower/
@@ -22,7 +27,7 @@ touch-designer-flower/
 │   │   └── pow.mpeg         
 │── index.html           # Entry point with Three.js and MediaPipe scripts
 │── script.js            # Core logic: scene, hand tracking, animations
-│── style.css            # Styles for full-screen layout and canvas
+│── style.css            
 ```
 
 ## Setup & Run
