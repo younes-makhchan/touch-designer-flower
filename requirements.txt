@@ -1,7 +1,0 @@
-pygame 
-numpy
-PyOpenGL
-glfw 
-numpy
-opencv-python
-mediapipe
