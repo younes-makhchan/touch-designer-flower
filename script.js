@@ -43,14 +43,14 @@ let morphPeaked = false;
 let showSpinText = false;
 let spinTextTimer = 0;
 
-const backgroundAudio = new Audio('../background.mp3');
+const backgroundAudio = new Audio('./assets/audio/background.mp3');
 backgroundAudio.loop = true;
 backgroundAudio.volume = 0.5;
 
-const pulseAudio = new Audio('../pow.mpeg');
+const pulseAudio = new Audio('./assets/audio/pow.mpeg');
 pulseAudio.volume = 0.7;
 
-const morphAudio = new Audio('../swosh.mpeg');
+const morphAudio = new Audio('./assets/audio/swosh.mpeg');
 morphAudio.volume = 0.7;
 
 const minDistMorph = 0.05;
@@ -161,7 +161,7 @@ function createDahlia(steps = 90, ts = 1200) {
     const positions = [];
     const colors = [];
     const indices = [];
-    const rows = x;
+    const rows = steps;
     const cols = ts;
 
 

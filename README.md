@@ -29,10 +29,9 @@ touch-designer-flower/
 1. **Prerequisites**:
    - Modern browser (Chrome recommended for MediaPipe).
    - Webcam access.
-   - No server needed; open `three/index.html` directly (file:// protocol works for local files).
 
 2. **Run**:
-   - Open `three/index.html` in browser.
+   - Open `index.html` in browser.
    - Allow webcam permission.
    - Position hands in frame; right for morph, left for spin.
 
@@ -50,7 +49,6 @@ touch-designer-flower/
 - **Low FPS**: Reduce resolution in script.js (width/height) or modelComplexity in hands.setOptions().
 - **No Hand Detection**: Check webcam, lighting; ensure maxNumHands: 2.
 - **Audio Issues**: Ensure files load; catch errors logged to console.
-- **Cross-Origin**: If serving, use local server (e.g., Python `http.server`).
 
 ## Tech Stack
 - **Three.js**: 3D rendering and controls.
